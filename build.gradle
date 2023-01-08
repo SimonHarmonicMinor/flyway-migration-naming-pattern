@@ -1,0 +1,84 @@
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.util.regex.Pattern
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.0.1'
+    id 'io.spring.dependency-management' version '1.1.0'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '17'
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    set('testcontainersVersion', "1.17.6")
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.flywaydb:flyway-core'
+    compileOnly 'org.projectlombok:lombok'
+    runtimeOnly 'org.postgresql:postgresql'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.testcontainers:testcontainers-bom:${testcontainersVersion}"
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+def migrationExclusions = [/* migration names exclusions */]
+
+task validateFlywayMigrations {
+    def migrationPattern = "^V\\d{4}\\.\\d{2}\\.\\d{2}\\.\\d+__[a-z_]+\\.sql\$"
+    def datePattern = Pattern.compile("\\d{4}\\.\\d{2}\\.\\d{2}")
+
+    doLast {
+        for (def file in fileTree('src/main/resources/db/migration')) {
+            final String migrationName = file.getName()
+            if (!file.isFile() || migrationExclusions.contains(migrationName)) {
+                continue
+            }
+            if (!migrationName.matches(migrationPattern)) {
+                throw new GradleException("Migration '$migrationName' does not match pattern '$migrationPattern'")
+            }
+            def matcher = datePattern.matcher(migrationName)
+            if (matcher.find()) {
+                def date = matcher.group()
+                try {
+                    LocalDate.parse(date, DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+                } catch (DateTimeParseException e) {
+                    throw new GradleException(
+                            "Migration '$migrationName' has invalid date value. Couldn't be parsed with pattern 'yyyy.MM.dd'",
+                            e
+                    )
+                }
+            } else {
+                throw new GradleException("Migration '$migrationName' has no date by pattern '$datePattern'")
+            }
+        }
+    }
+}
+
+compileJava.dependsOn validateFlywayMigrations
